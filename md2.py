@@ -1,46 +1,62 @@
 import pandas as pd
 import numpy as np
-from sklearn.covariance import MinCovDet
 import matplotlib.pyplot as plt
+from scipy.stats import zscore
 
 # Load training data
-train_data = pd.read_excel("C:\\code\\ps\\Qualified lots.xlsx", usecols=["Cycle", "Capacity_Cell1", "Capacity_Cell2", "Capacity_Cell3", "Capacity_Cell4", "Capacity_Cell5", "Capacity_Cell6"])
+train_data = pd.read_excel("C:\\code\\ps\\Qualified lots.xlsx")
 
 # Load test data
-test_data = pd.read_excel("C:\\code\\ps\\Subsequent lots for ongoing reliability testing.xlsx", usecols=["Cycle", "Capacity_Cell1", "Capacity_Cell2", "Capacity_Cell3", "Capacity_Cell4", "Capacity_Cell5", "Capacity_Cell6"])
+test_data = pd.read_excel("C:\\code\\ps\\Subsequent lots for ongoing reliability testing.xlsx")
 
-# Combine train and test data for anomaly detection (optional)
-combined_data = pd.concat([train_data, test_data], ignore_index=True)
+# Define a function to calculate Mahalanobis Distance
+def mahalanobis_distance(x, mean, cov):
+    diff = x - mean
+    inv_cov = np.linalg.inv(cov)
+    md = np.sqrt(np.dot(np.dot(diff, inv_cov), diff.T))
+    return md
 
-# Select features for anomaly detection
-features = ["Cycle", "Capacity_Cell1", "Capacity_Cell2", "Capacity_Cell3", "Capacity_Cell4", "Capacity_Cell5", "Capacity_Cell6"]
+# Extract cycle numbers and capacity data
+train_cycles = train_data.iloc[:, 0].values
+train_capacities = train_data.iloc[:, 1:].values
 
-# Compute Mahalanobis distance for each data point
-mcd = MinCovDet().fit(combined_data[features])
-mahalanobis_distances = mcd.mahalanobis(combined_data[features])
+test_cycles = test_data.iloc[:, 0].values
+test_capacities = test_data.iloc[:, 1:].values
 
-# Define anomaly threshold (adjust as needed)
-threshold = np.mean(mahalanobis_distances) + 3 * np.std(mahalanobis_distances)
+# Calculate mean vector and covariance matrix for training data
+mean_vector = np.mean(train_capacities, axis=0)
+cov_matrix = np.cov(train_capacities, rowvar=False)
 
-# Visualize anomalies in test data
-plt.figure(figsize=(12, 6))  # Adjust figure size as needed
-plt.plot(combined_data["Cycle"], mahalanobis_distances, color='blue', label='Mahalanobis Distance')
-plt.axhline(y=threshold, color='red', linestyle='--', label='Anomaly Threshold')
-plt.scatter(combined_data["Cycle"][:len(train_data)], mahalanobis_distances[:len(train_data)], color='black', marker='o', s=10, label='Training Samples')
+# Calculate MD scores for training data
+train_md_scores = np.array([mahalanobis_distance(x, mean_vector, cov_matrix) for x in train_capacities])
 
-# Highlight the testing sample
-test_sample_index = 157  # Replace with the actual index of your testing sample
-plt.scatter(combined_data["Cycle"][test_sample_index], mahalanobis_distances[test_sample_index], color='red', marker='o', s=100, label='Testing Sample')
+# Calculate the anomaly threshold using the mean and standard deviation of the training MD scores
+threshold = np.mean(train_md_scores) + 5 * np.std(train_md_scores)
 
-# Annotations
-plt.annotate('Testing Sample', xy=(combined_data["Cycle"][test_sample_index], mahalanobis_distances[test_sample_index]), xytext=(200, 10), arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0.2'), fontsize=12)
-plt.annotate('Training Samples', xy=(combined_data["Cycle"][len(train_data) - 1], threshold), xytext=(400, 4), arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=-0.2'), fontsize=12)
+# Calculate MD scores for test data
+test_md_scores = np.array([[mahalanobis_distance(x, mean_vector, cov_matrix) for x in test_capacities[:,i]] for i in range(test_capacities.shape[1])])
 
-# Labeling and formatting
-plt.xlabel('Cycle Number', fontsize=14)
-plt.ylabel('Mahalanobis Distance', fontsize=14)
-plt.title('Anomaly Detection using Mahalanobis Distance', fontsize=16)
+# Plot the MD scores and anomaly threshold
+plt.figure(figsize=(12, 8))
+
+# Plot MD scores for training data
+plt.plot(train_cycles, train_md_scores, label='Training Data', color='black')
+
+# Plot MD scores for test data
+for i in range(test_capacities.shape[1]):
+    plt.plot(test_cycles, test_md_scores[i], label=f'Test Cell {i+1}')
+
+# Plot the anomaly threshold
+plt.axhline(y=threshold, color='r', linestyle='--', label='Anomaly Threshold')
+
+plt.xlabel('Cycle Number')
+plt.ylabel('Mahalanobis Distance')
+plt.title('Mahalanobis Distance Scores for Training and Test Data')
+plt.legend()
 plt.grid(True)
-plt.legend(loc='upper left')
-plt.tight_layout()
 plt.show()
+
+# Print the cycle number at which each test cell crosses the threshold
+for i in range(test_capacities.shape[1]):
+    anomaly_cycle = test_cycles[np.where(test_md_scores[i] > threshold)[0][0]]
+    print(f"Test Cell {i+1} crosses the anomaly threshold at cycle number {anomaly_cycle}.")
